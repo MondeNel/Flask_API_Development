@@ -1,4 +1,4 @@
-from api import app, db
+from main import app, db
 
 # Create all database tables
 # This script initializes the database by creating tables defined in the SQLAlchemy models.

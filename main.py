@@ -1,17 +1,13 @@
-from flask import Flask
+from flask import Flask, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_restful import Api, Resource, reqparse, fields, marshal_with, abort
+import csv
+import os
 
 # Initialize the Flask application
 app = Flask(__name__)
-
-# Configure the SQLite database URI
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'
-
-# Initialize SQLAlchemy with the Flask app
 db = SQLAlchemy(app)
-
-# Initialize Flask-Restful API
 api = Api(app)
 
 
@@ -25,6 +21,18 @@ class UserModel(db.Model):
 
     def __repr__(self):
         return f'User(name = {self.name}, email = {self.email})'
+
+
+# Create CSV export function
+def export_users_to_csv():
+    users = UserModel.query.all()
+    file_path = os.path.join(os.getcwd(), 'users.csv')
+
+    with open(file_path, mode='w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(['ID', 'Name', 'Email'])  # Header
+        for user in users:
+            writer.writerow([user.id, user.name, user.email])
 
 
 # Request parser for creating users
@@ -51,22 +59,17 @@ class Users(Resource):
     """
     @marshal_with(userFields)
     def get(self):
-        """
-        Get all users.
-        """
         return UserModel.query.all()
 
     @marshal_with(userFields)
     def post(self):
-        """
-        Create a new user.
-        """
         args = user_args.parse_args()
         if UserModel.query.filter_by(name=args['name']).first():
             abort(400, message="User with this name already exists.")
         new_user = UserModel(name=args['name'], email=args['email'])
         db.session.add(new_user)
         db.session.commit()
+        export_users_to_csv()
         return new_user, 201
 
 
@@ -76,30 +79,29 @@ class User(Resource):
     """
     @marshal_with(userFields)
     def get(self, user_id):
-        """
-        Get a single user by ID.
-        """
         user = UserModel.query.get(user_id)
         if not user:
             abort(404, message="User not found.")
         return user
 
     def delete(self, user_id):
-        """
-        Delete a user by ID.
-        """
         user = UserModel.query.get(user_id)
         if not user:
             abort(404, message="User not found.")
+        
         db.session.delete(user)
         db.session.commit()
-        return {'message': f'User {user_id} deleted successfully.'}, 204
+        export_users_to_csv()
+
+        # Get remaining users
+        remaining_users = UserModel.query.all()
+        return {
+            'message': f'User {user_id} deleted successfully.',
+            'remaining_users': [{'id': u.id, 'name': u.name, 'email': u.email} for u in remaining_users]
+        }, 200
 
     @marshal_with(userFields)
     def patch(self, user_id):
-        """
-        Partially update a user by ID.
-        """
         args = patch_args.parse_args()
         user = UserModel.query.get(user_id)
         if not user:
@@ -111,6 +113,7 @@ class User(Resource):
             user.email = args['email']
 
         db.session.commit()
+        export_users_to_csv()
         return user
 
 
@@ -121,10 +124,14 @@ api.add_resource(User, '/api/users/<int:user_id>')
 
 @app.route('/')
 def home():
-    """Root route."""
     return '<h1>Welcome to the Flask API!</h1>'
 
 
 # Run the application
 if __name__ == '__main__':
+    # Ensure DB is created and CSV file exists on first run
+    with app.app_context():
+        db.create_all()
+        export_users_to_csv()
+
     app.run(debug=True)
