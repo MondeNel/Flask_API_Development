@@ -18,10 +18,6 @@ api = Api(app)
 class UserModel(db.Model):
     """
     SQLAlchemy model representing a User entity in the database.
-    Fields:
-        - id (Integer): Primary key
-        - name (String): Unique username (required)
-        - email (String): Unique email address (required)
     """
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(80), unique=True, nullable=False)
@@ -31,12 +27,17 @@ class UserModel(db.Model):
         return f'User(name = {self.name}, email = {self.email})'
 
 
-# Request parser to handle and validate incoming POST request data
+# Request parser for creating users
 user_args = reqparse.RequestParser()
 user_args.add_argument('name', type=str, help='Name of the user', required=True)
 user_args.add_argument('email', type=str, help='Email of the user', required=True)
 
-# Define the fields for marshalling user data in API responses
+# Request parser for patching/updating users
+patch_args = reqparse.RequestParser()
+patch_args.add_argument('name', type=str, help='Updated name of the user')
+patch_args.add_argument('email', type=str, help='Updated email of the user')
+
+# Fields for marshalling user data
 userFields = {
     'id': fields.Integer,
     'name': fields.String,
@@ -46,90 +47,84 @@ userFields = {
 
 class Users(Resource):
     """
-    Resource for handling user-related API operations.
-    Supports:
-        - GET: Retrieve all users
-        - POST: Create a new user
+    Resource for handling all users.
     """
     @marshal_with(userFields)
     def get(self):
         """
-        Retrieve and return all users in the database.
-
-        Returns:
-            List of users serialized in JSON format.
+        Get all users.
         """
-        users = UserModel.query.all()
-        return users
+        return UserModel.query.all()
 
     @marshal_with(userFields)
     def post(self):
         """
-        Create and store a new user in the database.
-
-        Returns:
-            JSON of the created user with HTTP 201 status code.
-
-        Raises:
-            400 Bad Request if a user with the same name already exists.
+        Create a new user.
         """
         args = user_args.parse_args()
-        user = UserModel(name=args['name'], email=args['email'])
-
-        # Check for existing user with the same name
-        existing_user = UserModel.query.filter_by(name=args['name']).first()
-        if existing_user:
+        if UserModel.query.filter_by(name=args['name']).first():
             abort(400, message="User with this name already exists.")
-
-        # Add and commit the new user to the database
-        db.session.add(user)
+        new_user = UserModel(name=args['name'], email=args['email'])
+        db.session.add(new_user)
         db.session.commit()
-        return user, 201
-
+        return new_user, 201
 
 
 class User(Resource):
     """
-    Resource for operations on a single user.
-    Supports:
-        - DELETE: Delete a user by ID
+    Resource for operations on a single user by ID.
     """
-    def delete(self, user_id):
+    @marshal_with(userFields)
+    def get(self, user_id):
         """
-        Delete a user by their ID.
-
-        Args:
-            user_id (int): ID of the user to delete
-
-        Returns:
-            A success message with HTTP 204 status code
-
-        Raises:
-            404 Not Found if the user does not exist
+        Get a single user by ID.
         """
         user = UserModel.query.get(user_id)
         if not user:
-            abort(404, message=f"User with ID {user_id} not found.")
+            abort(404, message="User not found.")
+        return user
 
+    def delete(self, user_id):
+        """
+        Delete a user by ID.
+        """
+        user = UserModel.query.get(user_id)
+        if not user:
+            abort(404, message="User not found.")
         db.session.delete(user)
         db.session.commit()
-        return {"message": f"User with ID {user_id} has been deleted."}, 204
+        return {'message': f'User {user_id} deleted successfully.'}, 204
 
-# Register the Users resource to the '/api/users' endpoint
+    @marshal_with(userFields)
+    def patch(self, user_id):
+        """
+        Partially update a user by ID.
+        """
+        args = patch_args.parse_args()
+        user = UserModel.query.get(user_id)
+        if not user:
+            abort(404, message="User not found.")
+
+        if args['name']:
+            user.name = args['name']
+        if args['email']:
+            user.email = args['email']
+
+        db.session.commit()
+        return user
+
+
+# Register API routes
 api.add_resource(Users, '/api/users')
+api.add_resource(User, '/api/users/<int:user_id>')
 
 
 @app.route('/')
 def home():
-    """
-    Root route of the Flask application.
-
-    Returns:
-        A simple HTML welcome message.
-    """
+    """Root route."""
     return '<h1>Welcome to the Flask API!</h1>'
 
 
-# Entry point of the application
+# Run the application
 if __name__ == '__main__':
     app.run(debug=True)
